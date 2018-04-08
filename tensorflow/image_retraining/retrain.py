@@ -109,6 +109,7 @@ import random
 import re
 import sys
 import tarfile
+from random import randint
 
 import numpy as np
 from six.moves import urllib
@@ -127,6 +128,7 @@ FLAGS = None
 # sizes. If you want to adapt this script to work with another model, you will
 # need to update these to reflect the values in the network you're using.
 MAX_NUM_IMAGES_PER_CLASS = 2 ** 27 - 1  # ~134M
+number_of_training_images = 0
 
 
 def create_image_lists(image_dir, testing_percentage, validation_percentage):
@@ -822,7 +824,22 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor,
   tf.summary.scalar('cross_entropy', cross_entropy_mean)
 
   with tf.name_scope('train'):
-    optimizer = tf.train.GradientDescentOptimizer(FLAGS.learning_rate)
+    global_step = tf.get_variable(
+        'global_step', [],
+        initializer=tf.constant_initializer(0), trainable=False)
+    # Calculate the learning rate schedule.
+    num_batches_per_epoch = (number_of_training_images /
+                             FLAGS.train_batch_size)
+    decay_steps = int(num_batches_per_epoch * 30)
+
+    # Decay the learning rate exponentially based on the number of steps.
+    lr = tf.train.exponential_decay(FLAGS.learning_rate,
+                                    global_step,
+                                    decay_steps,
+                                    16,
+                                    staircase=True)
+
+    optimizer = tf.train.RMSPropOptimizer (lr, FLAGS.RMSProp_decay, FLAGS.RMSProp_momentum, FLAGS.RMSProp_epsilon)
     train_step = optimizer.minimize(cross_entropy_mean)
 
   return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
@@ -991,20 +1008,22 @@ def add_jpeg_decoding(input_width, input_height, input_depth, input_mean,
     Tensors for the node to feed JPEG data into, and the output of the
       preprocessing steps.
   """
+  random.seed(100)
   jpeg_data = tf.placeholder(tf.string, name='DecodeJPGInput')
   decoded_image = tf.image.decode_jpeg(jpeg_data, channels=input_depth)
   decoded_image_as_float = tf.cast(decoded_image, dtype=tf.float32)
   decoded_image_4d = tf.expand_dims(decoded_image_as_float, 0)
   resize_shape = tf.stack([input_height, input_width])
   resize_shape_as_int = tf.cast(resize_shape, dtype=tf.int32)
-  resized_image = tf.image.resize_bilinear(decoded_image_4d,
-                                           resize_shape_as_int)
+  resized_image = tf.image.resize_nearest_neighbor(decoded_image_4d, resize_shape_as_int)
+  rotated_image = tf.contrib.image.rotate(resized_image, randint(0,359))
   offset_image = tf.subtract(resized_image, input_mean)
   mul_image = tf.multiply(offset_image, 1.0 / input_std)
   return jpeg_data, mul_image
 
 
 def main(_):
+  global number_of_training_images
   # Needed to make sure the logging output is visible.
   # See https://github.com/tensorflow/tensorflow/issues/3047
   tf.logging.set_verbosity(tf.logging.INFO)
@@ -1027,6 +1046,9 @@ def main(_):
   image_lists = create_image_lists(FLAGS.image_dir, FLAGS.testing_percentage,
                                    FLAGS.validation_percentage)
   class_count = len(image_lists.keys())
+  for key in image_lists.keys():
+      number_of_training_images += len(image_lists[key]['training'])
+  print("Number of training images: {}".format(number_of_training_images))
   if class_count == 0:
     tf.logging.error('No valid folders of images found at ' + FLAGS.image_dir)
     return -1
@@ -1182,6 +1204,22 @@ def main(_):
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
+  parser.add_argument(
+  '--RMSProp_momentum',
+  type=float,
+  default=0.0,
+  help='RMSProp momentum'
+  )
+  parser.add_argument(
+  '--RMSProp_decay',
+  type=float,
+  default=0.9
+  )
+  parser.add_argument(
+  '--RMSProp_epsilon',
+  type=float,
+  default=1e-10
+  )
   parser.add_argument(
       '--image_dir',
       type=str,
