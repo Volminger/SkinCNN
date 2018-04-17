@@ -690,9 +690,11 @@ def add_input_distortions(flip_left_right, random_crop, random_scale,
   Returns:
     The jpeg input layer and the distorted result tensor.
   """
-
+  random.seed(100)
+  #rotated_image = tf.contrib.image.rotate(resized_image, randint(0,359))
   jpeg_data = tf.placeholder(tf.string, name='DistortJPGInput')
   decoded_image = tf.image.decode_jpeg(jpeg_data, channels=input_depth)
+  #rotated_image = tf.contrib.image.rotate(decoded_image, randint(0,359))
   decoded_image_as_float = tf.cast(decoded_image, dtype=tf.float32)
   decoded_image_4d = tf.expand_dims(decoded_image_as_float, 0)
   margin_scale = 1.0 + (random_crop / 100.0)
@@ -840,6 +842,7 @@ def add_final_training_ops(class_count, final_tensor_name, bottleneck_tensor,
                                     staircase=True)
 
     optimizer = tf.train.RMSPropOptimizer (lr, FLAGS.RMSProp_decay, FLAGS.RMSProp_momentum, FLAGS.RMSProp_epsilon)
+    #optimizer = tf.train.GradientDescentOptimizer(FLAGS.learning_rate)
     train_step = optimizer.minimize(cross_entropy_mean)
 
   return (train_step, cross_entropy_mean, bottleneck_input, ground_truth_input,
@@ -1008,7 +1011,6 @@ def add_jpeg_decoding(input_width, input_height, input_depth, input_mean,
     Tensors for the node to feed JPEG data into, and the output of the
       preprocessing steps.
   """
-  random.seed(100)
   jpeg_data = tf.placeholder(tf.string, name='DecodeJPGInput')
   decoded_image = tf.image.decode_jpeg(jpeg_data, channels=input_depth)
   decoded_image_as_float = tf.cast(decoded_image, dtype=tf.float32)
@@ -1016,13 +1018,22 @@ def add_jpeg_decoding(input_width, input_height, input_depth, input_mean,
   resize_shape = tf.stack([input_height, input_width])
   resize_shape_as_int = tf.cast(resize_shape, dtype=tf.int32)
   resized_image = tf.image.resize_nearest_neighbor(decoded_image_4d, resize_shape_as_int)
-  rotated_image = tf.contrib.image.rotate(resized_image, randint(0,359))
   offset_image = tf.subtract(resized_image, input_mean)
   mul_image = tf.multiply(offset_image, 1.0 / input_std)
   return jpeg_data, mul_image
 
 
 def main(_):
+  print("")
+  print("Train batch size: {}, bottleneck_dir: {}, model_dir: {}".format(FLAGS.train_batch_size, FLAGS.bottleneck_dir, FLAGS.model_dir))
+  print("")
+  print("RMSProp_momentum: {}, RMSProp_decay: {}, RMSProp_epsilon: {}".format(FLAGS.RMSProp_momentum, FLAGS.RMSProp_decay, FLAGS.RMSProp_epsilon))
+  print("")
+  print("learning rate: {}".format(FLAGS.learning_rate))
+  print("")
+  print("MaxEpochsWithoutBetterValidationAcc: {}".format(FLAGS.MaxEpochsWithoutBetterValidationAcc))
+  print("")
+  print("FLAGS.intermediate_output_graphs_dir: {}".format(FLAGS.intermediate_output_graphs_dir))
   global number_of_training_images
   # Needed to make sure the logging output is visible.
   # See https://github.com/tensorflow/tensorflow/issues/3047
@@ -1108,8 +1119,19 @@ def main(_):
     init = tf.global_variables_initializer()
     sess.run(init)
 
+    best_validation_acc = 0;
+    numberOfEpochsWithoutBetterValidationAcc = 0;
+    sessWithBestValidationAcc = sess
+    previous_validation_acc = 0
+    print("number_of_training_images: {}".format(number_of_training_images))
+    print("train_batch_size: {}".format(FLAGS.train_batch_size))
+    print(int(number_of_training_images/FLAGS.train_batch_size + 1))
     # Run the training for as many cycles as requested on the command line.
     for i in range(FLAGS.how_many_training_steps):
+      if FLAGS.MaxEpochsWithoutBetterValidationAcc == numberOfEpochsWithoutBetterValidationAcc:
+          break
+      if do_distort_images:
+          print("Step: {}".format(i))
       # Get a batch of input bottleneck values, either calculated fresh every
       # time with distortions applied, or from the cache stored on disk.
       if do_distort_images:
@@ -1135,11 +1157,14 @@ def main(_):
 
       # Every so often, print out how well the graph is training.
       is_last_step = (i + 1 == FLAGS.how_many_training_steps)
-      if (i % FLAGS.eval_step_interval) == 0 or is_last_step:
+      #if (i % FLAGS.eval_step_interval) == 0 or is_last_step:
+      if( i % int(number_of_training_images/FLAGS.train_batch_size) == 0 or is_last_step):
+        print("Epoch: {}".format(i / int(number_of_training_images/FLAGS.train_batch_size)))
         train_accuracy, cross_entropy_value = sess.run(
             [evaluation_step, cross_entropy],
             feed_dict={bottleneck_input: train_bottlenecks,
                        ground_truth_input: train_ground_truth})
+
         tf.logging.info('%s: Step %d: Train accuracy = %.1f%%' %
                         (datetime.now(), i, train_accuracy * 100))
         tf.logging.info('%s: Step %d: Cross entropy = %f' %
@@ -1156,6 +1181,20 @@ def main(_):
             [merged, evaluation_step],
             feed_dict={bottleneck_input: validation_bottlenecks,
                        ground_truth_input: validation_ground_truth})
+        if previous_validation_acc > validation_accuracy:
+            numberOfEpochsWithoutBetterValidationAcc+=1
+        else:
+            numberOfEpochsWithoutBetterValidationAcc = 0;
+        previous_validation_acc = validation_accuracy;
+        print("best_validation_acc: {}, numberOfEpochsWithoutBetterValidationAcc: {}".format(best_validation_acc, numberOfEpochsWithoutBetterValidationAcc))
+        if validation_accuracy > best_validation_acc:
+            best_validation_acc = validation_accuracy
+            sessWithBestValidationAcc = sess
+            intermediate_file_name = (FLAGS.intermediate_output_graphs_dir +
+                                      'intermediate_.pb')
+            tf.logging.info('Save intermediate result to : ' +
+                            intermediate_file_name)
+            save_graph_to_file(sess, graph, intermediate_file_name)
         validation_writer.add_summary(validation_summary, i)
         tf.logging.info('%s: Step %d: Validation accuracy = %.1f%% (N=%d)' %
                         (datetime.now(), i, validation_accuracy * 100,
@@ -1176,11 +1215,11 @@ def main(_):
     # some new images we haven't used before.
     test_bottlenecks, test_ground_truth, test_filenames = (
         get_random_cached_bottlenecks(
-            sess, image_lists, FLAGS.test_batch_size, 'testing',
+            sessWithBestValidationAcc, image_lists, FLAGS.test_batch_size, 'testing',
             FLAGS.bottleneck_dir, FLAGS.image_dir, jpeg_data_tensor,
             decoded_image_tensor, resized_image_tensor, bottleneck_tensor,
             FLAGS.architecture))
-    test_accuracy, predictions = sess.run(
+    test_accuracy, predictions = sessWithBestValidationAcc.run(
         [evaluation_step, prediction],
         feed_dict={bottleneck_input: test_bottlenecks,
                    ground_truth_input: test_ground_truth})
@@ -1197,7 +1236,7 @@ def main(_):
 
     # Write out the trained graph and labels with the weights stored as
     # constants.
-    save_graph_to_file(sess, graph, FLAGS.output_graph)
+    save_graph_to_file(sessWithBestValidationAcc, graph, FLAGS.output_graph)
     with gfile.FastGFile(FLAGS.output_labels, 'w') as f:
       f.write('\n'.join(image_lists.keys()) + '\n')
 
@@ -1205,20 +1244,25 @@ def main(_):
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument(
-  '--RMSProp_momentum',
-  type=float,
-  default=0.0,
-  help='RMSProp momentum'
+      '--MaxEpochsWithoutBetterValidationAcc',
+      type=int,
+      default=10
   )
   parser.add_argument(
-  '--RMSProp_decay',
-  type=float,
-  default=0.9
+      '--RMSProp_momentum',
+      type=float,
+      default=0.0,
+      help='RMSProp momentum'
   )
   parser.add_argument(
-  '--RMSProp_epsilon',
-  type=float,
-  default=1e-10
+      '--RMSProp_decay',
+      type=float,
+      default=0.9
+  )
+  parser.add_argument(
+      '--RMSProp_epsilon',
+      type=float,
+      default=1e-10
   )
   parser.add_argument(
       '--image_dir',
@@ -1262,7 +1306,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--how_many_training_steps',
       type=int,
-      default=4000,
+      default=1000,
       help='How many training steps to run before ending.'
   )
   parser.add_argument(
@@ -1309,7 +1353,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--validation_batch_size',
       type=int,
-      default=100,
+      default=-1,
       help="""\
       How many images to use in an evaluation batch. This validation set is
       used much more often than the test set, and is an early indicator of how
