@@ -1194,11 +1194,14 @@ def main(_):
                                       'intermediate_.pb')
             tf.logging.info('Save intermediate result to : ' +
                             intermediate_file_name)
-            save_graph_to_file(sess, graph, intermediate_file_name)
+            save_graph_to_file(sessWithBestValidationAcc, graph, intermediate_file_name)
+            with gfile.FastGFile(FLAGS.output_labels, 'w') as f:
+                f.write('\n'.join(image_lists.keys()) + '\n')
         validation_writer.add_summary(validation_summary, i)
         tf.logging.info('%s: Step %d: Validation accuracy = %.1f%% (N=%d)' %
                         (datetime.now(), i, validation_accuracy * 100,
                          len(validation_bottlenecks)))
+        print("")
 
       # Store intermediate results
       intermediate_frequency = FLAGS.intermediate_store_frequency
@@ -1262,7 +1265,7 @@ if __name__ == '__main__':
   parser.add_argument(
       '--RMSProp_epsilon',
       type=float,
-      default=1e-10
+      default=0.1
   )
   parser.add_argument(
       '--image_dir',
