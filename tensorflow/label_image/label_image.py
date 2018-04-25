@@ -30,7 +30,45 @@ from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 
 
+benignLes = ["seborrheic keratosis", "seborrheic keratosis bucket", "epidermal tumor benign bucket", "nevus", "pigmented lesion benign bucket", "dermal tumor benign", "solar lentigo (PIGMENTED LESION BENIGN-BUCKET)", "Eczema Spongiotic Dermatitis", "PIGMENTED LESION BENIGN-BUCKET", "Seborrheic Keratosis-BUCKET"]
+nonNeoplasticLes = ["rosacea rhinophyma and variants", "acne folliculitis hidradenitis and diseases of appendegeal structures bucket", "acne vulgaris", "psoriasis pityriasis rubra pilaris and papulosquamous disorders", "inflammatory bucket", "eczema spongiotic dermatitis", "Acne Folliculitis Hidradenitis And Diseases Of Appendegeal Structures-BUCKET", "INFLAMMATORY-BUCKET"]
+maligantLes = ["maligant","MELANOMA", "basal cell carcinoma", "pigmented lesion malignant bucket", "epidermal tumor malignant bucket", "squamous cell carcinoma (EPIDERMAL TUMOR MALIGNANT-BUCKET)", "Eczema Spongiotic Dermatitis", "PIGMENTED LESION MALIGNANT-BUCKET"]
+upperCaseBenignLes = [x.upper() for x in benignLes]
+upperCaseNonNeoplasticLes = [x.upper() for x in nonNeoplasticLes]
+upperCaseMaligantLes = [x.upper() for x in maligantLes]
 
+def load_graph(model_file):
+    graph = tf.Graph()
+    graph_def = tf.GraphDef()
+
+    with open(model_file, "rb") as f:
+        graph_def.ParseFromString(f.read())
+    with graph.as_default():
+        tf.import_graph_def(graph_def)
+
+    return graph
+
+def getLesClass(lesName):
+    if lesName.upper() in upperCaseBenignLes:
+        return "Benign"
+    elif lesName.upper() in upperCaseNonNeoplasticLes:
+        return "nonNeoplastic"
+    elif lesName.upper() in upperCaseMaligantLes:
+        return "maligant"
+    return "Les not found"
+
+def getProbScoreForClass(className, benProp, nonProp, malProp):
+    if className is "Benign":
+        return benProp
+    elif className is "nonNeoplastic":
+        return nonProp
+    elif className is "maligant":
+        return malProp
+    return -1
+
+def getMaxProb(benProp, nonProp, malProp):
+    listProb = [benProp, nonProp, malProp]
+    return max(listProb)
 
 def load_graph(model_file):
     graph = tf.Graph()
@@ -136,8 +174,8 @@ if __name__ == "__main__":
     output_operation = graph.get_operation_by_name(output_name)
 
     labels = load_labels(label_file)
-    numberOfPredictedDiseases = [0,0,0,0,0,0,0,0,0]
-    indexForDiseaseToBeTested = labels.index(test_disease)
+    # numberOfPredictedDiseases = [0,0,0,0,0,0,0,0,0]
+    #indexForDiseaseToBeTested = labels.index(test_disease)
     result = []
     y = []
     yscore = []
@@ -171,27 +209,44 @@ if __name__ == "__main__":
 
             top_k = results.argsort()[-5:][::-1]
             # temp2 = result[atDis]
-            numberOfPredictedDiseases[top_k[0]] += 1
+            # numberOfPredictedDiseases[top_k[0]] += 1
             # y.append(1)
+
+            benignScore = 0
+            nonNeoplasticScore = 0
+            malignatScore = 0
+            for lesIndex in range(0,len(labels)):
+                class_ = getLesClass(labels[lesIndex])
+                if  class_ is "Benign":
+                    benignScore += results[lesIndex]
+                elif class_ is "nonNeoplastic":
+                    nonNeoplasticScore += results[lesIndex]
+                elif class_ is "maligant":
+                    malignatScore += results[lesIndex]
+            print(file_[0])
             if test_disease in file_[0]:
+                print("Inside if")
                 y.append(1)
             else:
                 y.append(0)
-            if test_disease == "melanoma":
-                yscore.append(results[3] + results[5])
-            if test_disease == "nevus":
-                yscore.append(results[1] + results[4])
-            result.append([labels[top_k[0]],results[indexForDiseaseToBeTested]])
+            if getLesClass(test_disease) is "maligant":
+                yscore.append(malignatScore)
+            elif getLesClass(test_disease) is "Benign":
+                yscore.append(1 - malignatScore)
+            else:
+                yscore.append(1 - malignatScore)
+            print("FileName: {}, maligantScore: {}, benignScore: {}, non-neoplasticScore: {}".format(file_[0].split('/')[6], malignatScore, benignScore, nonNeoplasticScore))
+            #result.append([labels[top_k[0]],results[indexForDiseaseToBeTested]])
             # print("Top: {}".format(labels[top_k[0]]))
         # atDis += 1
-    print("\n Testing {}".format(test_disease))
-    print("NumberOfPredictedDiseases")
-    for i, label in enumerate(labels):
-        print("    {}: {}".format(label, numberOfPredictedDiseases[i]))
-    print("\n")
-    for i in result:
-        print("Predicted disease: {},".format(i[0]))
-        print("  {} probability: {}".format(test_disease, i[1]))
+    # print("\n Testing {}".format(test_disease))
+    # print("NumberOfPredictedDiseases")
+    # for i, label in enumerate(labels):
+    #     print("    {}: {}".format(label, numberOfPredictedDiseases[i]))
+    # print("\n")
+    # for i in result:
+    #     print("Predicted disease: {},".format(i[0]))
+    #     print("  {} probability: {}".format(test_disease, i[1]))
     print(y)
     print(yscore)
 
