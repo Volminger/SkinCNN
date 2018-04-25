@@ -178,6 +178,7 @@ def create_image_lists(image_dir, testing_percentage, validation_percentage):
           'WARNING: Folder {} has more than {} images. Some images will '
           'never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS))
     label_name = re.sub(r'[^a-z0-9]+', ' ', dir_name.lower())
+    print(label_name)
     training_images = []
     testing_images = []
     validation_images = []
@@ -212,8 +213,94 @@ def create_image_lists(image_dir, testing_percentage, validation_percentage):
         'testing': testing_images,
         'validation': validation_images,
     }
+  print(result['nevus']['dir'])
+  print(len(result))
   return result
 
+def create_image_lists2(training_dir, validation_dir):
+      if not gfile.Exists(training_dir):
+            tf.logging.error("Image directory '" + training_dir + "' not found.'")
+            return None
+      if not gfile.Exists(validation_dir):
+            tf.logging.error("Image directory '" + validation_dir + "' not found.'")
+            return None
+      result = {}
+      training_list = create_image_list(training_dir)
+      validation_list = create_image_list(validation_dir)
+      sub_dirs = [x[0] for x in gfile.Walk(training_dir)]
+      # The root directory comes first, so skip it.
+      is_root_dir = True
+      for sub_dir in sub_dirs:
+        if is_root_dir:
+          is_root_dir = False
+          continue
+        extensions = ['jpg', 'jpeg', 'JPG', 'JPEG']
+        file_list = []
+        dir_name = os.path.basename(sub_dir)
+        tf.logging.info("Looking for images in '" + dir_name + "'")
+        for extension in extensions:
+          file_glob = os.path.join(training_dir, dir_name, '*.' + extension)
+          file_list.extend(gfile.Glob(file_glob))
+        if not file_list:
+          tf.logging.warning('No files found')
+          continue
+        if len(file_list) < 20:
+          tf.logging.warning(
+              'WARNING: Folder has less than 20 images, which may cause issues.')
+        elif len(file_list) > MAX_NUM_IMAGES_PER_CLASS:
+          tf.logging.warning(
+              'WARNING: Folder {} has more than {} images. Some images will '
+              'never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS))
+        label_name = re.sub(r'[^a-z0-9]+', ' ', dir_name.lower())
+
+        testing_images = []
+        result[label_name] = {
+            'dir': training_list[label_name]['dir'],
+            'training': training_list[label_name]['images'],
+            'validation': validation_list[label_name]['images'],
+            'testing': testing_images
+          }
+      return result
+
+def create_image_list(image_dir):
+      if not gfile.Exists(image_dir):
+        tf.logging.error("Image directory '" + image_dir + "' not found.")
+        return None
+      result = {}
+      sub_dirs = [x[0] for x in gfile.Walk(image_dir)]
+      # The root directory comes first, so skip it.
+      is_root_dir = True
+      for sub_dir in sub_dirs:
+        if is_root_dir:
+          is_root_dir = False
+          continue
+        extensions = ['jpg', 'jpeg', 'JPG', 'JPEG']
+        file_list = []
+        dir_name = os.path.basename(sub_dir)
+        tf.logging.info("Looking for images in '" + dir_name + "'")
+        for extension in extensions:
+          file_glob = os.path.join(image_dir, dir_name, '*.' + extension)
+          file_list.extend(gfile.Glob(file_glob))
+        if not file_list:
+          tf.logging.warning('No files found')
+          continue
+        if len(file_list) < 20:
+          tf.logging.warning(
+              'WARNING: Folder has less than 20 images, which may cause issues.')
+        elif len(file_list) > MAX_NUM_IMAGES_PER_CLASS:
+          tf.logging.warning(
+              'WARNING: Folder {} has more than {} images. Some images will '
+              'never be selected.'.format(dir_name, MAX_NUM_IMAGES_PER_CLASS))
+        label_name = re.sub(r'[^a-z0-9]+', ' ', dir_name.lower())
+        images = []
+        for file_name in file_list:
+          base_name = os.path.basename(file_name)
+          images.append(base_name)
+        result[label_name] = {
+            'dir': dir_name,
+            'images': images
+        }
+      return result
 
 def get_image_path(image_lists, label_name, index, image_dir, category):
   """"Returns a path to an image for a label at the given index.
@@ -451,7 +538,7 @@ def get_or_create_bottleneck(sess, image_lists, label_name, index, image_dir,
   return bottleneck_values
 
 
-def cache_bottlenecks(sess, image_lists, image_dir, bottleneck_dir,
+def cache_bottlenecks(sess, image_lists, training_dir, validation_dir, bottleneck_dir,
                       jpeg_data_tensor, decoded_image_tensor,
                       resized_input_tensor, bottleneck_tensor, architecture):
   """Ensures all the training, testing, and validation bottlenecks are cached.
@@ -482,6 +569,10 @@ def cache_bottlenecks(sess, image_lists, image_dir, bottleneck_dir,
   ensure_dir_exists(bottleneck_dir)
   for label_name, label_lists in image_lists.items():
     for category in ['training', 'testing', 'validation']:
+      if(category is 'training'):
+          image_dir = training_dir
+      elif category is 'validation':
+          image_dir = validation_dir
       category_list = label_lists[category]
       for index, unused_base_name in enumerate(category_list):
         get_or_create_bottleneck(
@@ -1054,18 +1145,19 @@ def main(_):
       create_model_graph(model_info))
 
   # Look at the folder structure, and create lists of all the images.
-  image_lists = create_image_lists(FLAGS.image_dir, FLAGS.testing_percentage,
-                                   FLAGS.validation_percentage)
+  #image_lists = create_image_lists(FLAGS.image_dir, FLAGS.testing_percentage,
+#                                   FLAGS.validation_percentage)
+  image_lists = create_image_lists2(FLAGS.Training_dir, FLAGS.Validation_dir)
   class_count = len(image_lists.keys())
   for key in image_lists.keys():
       number_of_training_images += len(image_lists[key]['training'])
   print("Number of training images: {}".format(number_of_training_images))
   if class_count == 0:
-    tf.logging.error('No valid folders of images found at ' + FLAGS.image_dir)
+    tf.logging.error('No valid folders of images found at ' + FLAGS.Training_dir)
     return -1
   if class_count == 1:
     tf.logging.error('Only one valid folder of images found at ' +
-                     FLAGS.image_dir +
+                     FLAGS.Training_dir +
                      ' - multiple classes are needed for classification.')
     return -1
 
@@ -1092,7 +1184,7 @@ def main(_):
     else:
       # We'll make sure we've calculated the 'bottleneck' image summaries and
       # cached them on disk.
-      cache_bottlenecks(sess, image_lists, FLAGS.image_dir,
+      cache_bottlenecks(sess, image_lists, FLAGS.Training_dir, FLAGS.Validation_dir,
                         FLAGS.bottleneck_dir, jpeg_data_tensor,
                         decoded_image_tensor, resized_image_tensor,
                         bottleneck_tensor, FLAGS.architecture)
@@ -1138,13 +1230,13 @@ def main(_):
         (train_bottlenecks,
          train_ground_truth) = get_random_distorted_bottlenecks(
              sess, image_lists, FLAGS.train_batch_size, 'training',
-             FLAGS.image_dir, distorted_jpeg_data_tensor,
+             FLAGS.Training_dir, distorted_jpeg_data_tensor,
              distorted_image_tensor, resized_image_tensor, bottleneck_tensor)
       else:
         (train_bottlenecks,
          train_ground_truth, _) = get_random_cached_bottlenecks(
              sess, image_lists, FLAGS.train_batch_size, 'training',
-             FLAGS.bottleneck_dir, FLAGS.image_dir, jpeg_data_tensor,
+             FLAGS.bottleneck_dir, FLAGS.Training_dir, jpeg_data_tensor,
              decoded_image_tensor, resized_image_tensor, bottleneck_tensor,
              FLAGS.architecture)
       # Feed the bottlenecks and ground truth into the graph, and run a training
@@ -1172,7 +1264,7 @@ def main(_):
         validation_bottlenecks, validation_ground_truth, _ = (
             get_random_cached_bottlenecks(
                 sess, image_lists, FLAGS.validation_batch_size, 'validation',
-                FLAGS.bottleneck_dir, FLAGS.image_dir, jpeg_data_tensor,
+                FLAGS.bottleneck_dir, FLAGS.Validation_dir, jpeg_data_tensor,
                 decoded_image_tensor, resized_image_tensor, bottleneck_tensor,
                 FLAGS.architecture))
         # Run a validation step and capture training summaries for TensorBoard
@@ -1246,6 +1338,14 @@ def main(_):
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
+  parser.add_argument(
+      '--Training_dir',
+      type=str
+  )
+  parser.add_argument(
+      '--Validation_dir',
+      type=str
+  )
   parser.add_argument(
       '--MaxEpochsWithoutBetterValidationAcc',
       type=int,
