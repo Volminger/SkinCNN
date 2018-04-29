@@ -25,16 +25,19 @@ import tensorflow as tf
 
 from os import walk
 from sklearn.metrics import roc_curve, auc
+from PIL import Image
+import math
+from random import randint
 
 
 import matplotlib.pyplot as plt
 
-benignLes = ["seborrheic keratosis", "seborrheic keratosis bucket", "epidermal tumor benign bucket", "nevus", "pigmented lesion benign bucket", "dermal tumor benign", "solar lentigo (PIGMENTED LESION BENIGN-BUCKET)", "Eczema Spongiotic Dermatitis", "PIGMENTED LESION BENIGN-BUCKET", "Seborrheic Keratosis-BUCKET"]
-nonNeoplasticLes = ["rosacea rhinophyma and variants", "acne folliculitis hidradenitis and diseases of appendegeal structures bucket", "acne vulgaris", "psoriasis pityriasis rubra pilaris and papulosquamous disorders", "inflammatory bucket", "eczema spongiotic dermatitis", "Acne Folliculitis Hidradenitis And Diseases Of Appendegeal Structures-BUCKET", "INFLAMMATORY-BUCKET"]
-maligantLes = ["MELANOMA", "basal cell carcinoma", "pigmented lesion malignant bucket", "epidermal tumor malignant bucket", "squamous cell carcinoma (EPIDERMAL TUMOR MALIGNANT-BUCKET)", "Eczema Spongiotic Dermatitis", "PIGMENTED LESION MALIGNANT-BUCKET"]
+benignLes = ["DERMAL TUMOR BENIGN", "EPIDERMAL TUMOR BENIGN-BUCKET", "EPIDERMAL TUMOR BENIGN BUCKET", "Nevus", "PIGMENTED LESION BENIGN-BUCKET", "PIGMENTED LESION BENIGN BUCKET", "Rosacea Rhinophyma And Variants", "Seborrheic Keratosis", "Seborrheic Keratosis-BUCKET", "Seborrheic Keratosis BUCKET"]
+nonNeoplasticLes = ["Acne Folliculitis Hidradenitis And Diseases Of Appendegeal Structures-BUCKET", "Acne Folliculitis Hidradenitis And Diseases Of Appendegeal Structures BUCKET", "Acne Vulgaris", "Eczema Spongiotic Dermatitis", "INFLAMMATORY-BUCKET", "INFLAMMATORY BUCKET", "Psoriasis Pityriasis Rubra Pilaris And Papulosquamous Disorders"]
+malignantLes = ["malignant","Basal Cell Carcinoma", "EPIDERMAL TUMOR MALIGNANT-BUCKET", "EPIDERMAL TUMOR MALIGNANT BUCKET", "Melanoma", "PIGMENTED LESION MALIGNANT-BUCKET", "PIGMENTED LESION MALIGNANT BUCKET"]
 upperCaseBenignLes = [x.upper() for x in benignLes]
 upperCaseNonNeoplasticLes = [x.upper() for x in nonNeoplasticLes]
-upperCaseMaligantLes = [x.upper() for x in maligantLes]
+upperCaseMalignantLes = [x.upper() for x in malignantLes]
 
 def load_graph(model_file):
     graph = tf.Graph()
@@ -52,8 +55,8 @@ def getLesClass(lesName):
         return "Benign"
     elif lesName.upper() in upperCaseNonNeoplasticLes:
         return "nonNeoplastic"
-    elif lesName.upper() in upperCaseMaligantLes:
-        return "maligant"
+    elif lesName.upper() in upperCaseMalignantLes:
+        return "malignant"
     return "Les not found"
 
 def getProbScoreForClass(className, benProp, nonProp, malProp):
@@ -61,7 +64,7 @@ def getProbScoreForClass(className, benProp, nonProp, malProp):
         return benProp
     elif className is "nonNeoplastic":
         return nonProp
-    elif className is "maligant":
+    elif className is "malignant":
         return malProp
     return -1
 
@@ -74,9 +77,34 @@ def read_tensor_from_image_file(file_name,
                                 input_width=299,
                                 input_mean=0,
                                 input_std=255):
+
+    im = Image.open(file_name)
+
+    size = 299,299
+    width, height = im.size
+    rotatedImagePillow = im.rotate(randint(0,359))
+    radius = min(width, height)/2
+    offset = int(radius * math.sqrt(2) / 2)
+    startPoint = np.array([int(height/2 - offset), int(width/2 - offset)])
+    croppedImagePillow = rotatedImagePillow.crop((startPoint[1], startPoint[0] , startPoint[1] + offset*2 , startPoint[0] + offset*2))
+    randomNumber = randint(0,1)
+    if randomNumber > 0.5:
+     flippedImagePillow =  croppedImagePillow.transpose(Image.FLIP_TOP_BOTTOM)
+    else:
+     flippedImagePillow = croppedImagePillow.rotate(0)
+    resizedImagePillow = flippedImagePillow.resize([299,299], Image.ANTIALIAS)
+
+    resizedImagePillow.save('Validation.jpeg')
+    im.close()
+    rotatedImagePillow.close()
+    croppedImagePillow.close()
+    flippedImagePillow.close()
+    resizedImagePillow.close()
+
+
     input_name = "file_reader"
     output_name = "normalized"
-    file_reader = tf.read_file(file_name, input_name)
+    file_reader = tf.read_file('Validation.jpeg', input_name)
     if file_name.endswith(".png"):
         image_reader = tf.image.decode_png(file_reader, channels=3, name="png_reader")
     elif file_name.endswith(".gif"):
@@ -153,7 +181,7 @@ def getValidationAcc(test_path, sess, label_file):
             malignatScore = results[8] + results[9] + results[4] + results[12]
             benignScore = results[0] + results[2] + results[3] + results[6] + results[10] + results[15]
             nonNeoplasticScore = 1 - malignatScore - benignScore
-            print("FileName: {}, maligantScore: {}, benignScore: {}, non-neoplasticScore: {}".format(file_[0].split('/')[6], malignatScore, benignScore, nonNeoplasticScore))
+            print("FileName: {}, malignantScore: {}, benignScore: {}, non-neoplasticScore: {}".format(file_[0].split('/')[6], malignatScore, benignScore, nonNeoplasticScore))
             print("LesClass: {}".format(getLesClass(file_[0].split('/')[6])))
             print("PropForClass: {}".format(getProbScoreForClass(getLesClass(file_[0].split('/')[6]), benignScore, nonNeoplasticScore, malignatScore)))
             if(getProbScoreForClass(getLesClass(file_[0].split('/')[6]), benignScore, nonNeoplasticScore, malignatScore) == getMaxProb(benignScore, nonNeoplasticScore, malignatScore)):
@@ -245,21 +273,21 @@ if __name__ == "__main__":
 
             benignScore = 0
             nonNeoplasticScore = 0
-            malignatScore = 0
+            malignantScore = 0
             for lesIndex in range(0,len(labels)):
                 class_ = getLesClass(labels[lesIndex])
                 if  class_ is "Benign":
                     benignScore += results[lesIndex]
                 elif class_ is "nonNeoplastic":
                     nonNeoplasticScore += results[lesIndex]
-                elif class_ is "maligant":
-                    malignatScore += results[lesIndex]
+                elif class_ is "malignant":
+                    malignantScore += results[lesIndex]
 
-            print("FileName: {}, maligantScore: {}, benignScore: {}, non-neoplasticScore: {}".format(file_[0].split('/')[6], malignatScore, benignScore, nonNeoplasticScore))
+            print("FileName: {}, malignantScore: {}, benignScore: {}, non-neoplasticScore: {}".format(file_[0].split('/')[6], malignantScore, benignScore, nonNeoplasticScore))
             if getLesClass(file_[0].split('/')[6]) == -1:
                 print("LesClass: {}".format(getLesClass(file_[0].split('/')[6])))
-            print("PropForClass: {}".format(getProbScoreForClass(getLesClass(file_[0].split('/')[6]), benignScore, nonNeoplasticScore, malignatScore)))
-            if(getProbScoreForClass(getLesClass(file_[0].split('/')[6]), benignScore, nonNeoplasticScore, malignatScore) == getMaxProb(benignScore, nonNeoplasticScore, malignatScore)):
+            print("PropForClass: {}".format(getProbScoreForClass(getLesClass(file_[0].split('/')[6]), benignScore, nonNeoplasticScore, malignantScore)))
+            if(getProbScoreForClass(getLesClass(file_[0].split('/')[6]), benignScore, nonNeoplasticScore, malignantScore) == getMaxProb(benignScore, nonNeoplasticScore, malignantScore)):
                 print("Is top prob")
                 y.append(1)
             else:
