@@ -121,6 +121,12 @@ from tensorflow.python.framework import tensor_shape
 from tensorflow.python.platform import gfile
 from tensorflow.python.util import compat
 
+from PIL import Image
+import math
+#tf.enable_eager_execution()
+
+
+
 FLAGS = None
 
 # These are all parameters that are tied to the particular model architecture
@@ -382,7 +388,7 @@ def create_model_graph(model_info):
   return graph, bottleneck_tensor, resized_input_tensor
 
 
-def run_bottleneck_on_image(sess, image_data, image_data_tensor,
+def run_bottleneck_on_image(image_path, sess,image_data_tensor,
                             decoded_image_tensor, resized_input_tensor,
                             bottleneck_tensor):
   """Runs inference on an image to extract the 'bottleneck' summary layer.
@@ -399,13 +405,71 @@ def run_bottleneck_on_image(sess, image_data, image_data_tensor,
     Numpy array of bottleneck values.
   """
   # First decode the JPEG image, resize it, and rescale the pixel values.
-  resized_input_values = sess.run(decoded_image_tensor,
-                                  {image_data_tensor: image_data})
-  # Then run it through the recognition network.
+  #image_data =  tf.contrib.image.rotate(image_data , randint(0,359))
+
+  im = Image.open(image_path)
+
+  size = 299,299
+  width, height = im.size
+  rotatedImagePillow = im.rotate(randint(0,359))
+  radius = min(width, height)/2
+  offset = int(radius * math.sqrt(2) / 2)
+  startPoint = np.array([int(height/2 - offset), int(width/2 - offset)])
+  croppedImagePillow = rotatedImagePillow.crop((startPoint[1], startPoint[0] , startPoint[1] + offset*2 , startPoint[0] + offset*2))
+  randomNumber = randint(0,1)
+  if randomNumber > 0.5:
+      flippedImagePillow =  croppedImagePillow.transpose(Image.FLIP_TOP_BOTTOM)
+  else:
+      flippedImagePillow = croppedImagePillow.rotate(0)
+  resizedImagePillow = flippedImagePillow.resize([299,299], Image.ANTIALIAS)
+
+  resizedImagePillow.save('Test.jpeg')
+  im.close()
+  rotatedImagePillow.close()
+  croppedImagePillow.close()
+  flippedImagePillow.close()
+  resizedImagePillow.close()
+  image_data2 = gfile.FastGFile('Test.jpeg', 'rb').read()
+  #
+  input_width = 299
+  input_height = 299
+  input_depth = 3
+  input_mean = 128
+  # input_std = 128
+  # decodedImage = tf.image.decode_jpeg(image_data, channels=3)
+  # rotatedImage = tf.contrib.image.rotate(decodedImage , randint(0,359))
+  # #
+  # radius = min(width, height)/2
+  # offset = int(radius * math.sqrt(2) / 2)
+  # startPoint = np.array([int(height/2 - offset), int(width/2 - offset)])
+  # croppedImage = tf.image.crop_to_bounding_box(rotatedImage, startPoint[0], startPoint[1] , offset*2 , offset*2);
+  # randomlyFlippedImage = tf.image.random_flip_left_right(croppedImage, 454512)
+  # resizedImage = tf.image.resize_images(randomlyFlippedImage, [299, 299])
+  #
+  # encodedImage = tf.image.encode_jpeg(tf.cast(resizedImage, tf.uint8))
+  #
+  # decoded_image_as_float = tf.cast(resizedImage, dtype=tf.float32)
+  # decoded_image_4d = tf.expand_dims(decoded_image_as_float, 0)
+
+ # First decode the JPEG image, resize it, and rescale the pixel values.
+  resized_input_values= sess.run(decoded_image_tensor,
+                                {image_data_tensor: image_data2})
+
   bottleneck_values = sess.run(bottleneck_tensor,
                                {resized_input_tensor: resized_input_values})
   bottleneck_values = np.squeeze(bottleneck_values)
+
+
+  # Uncomment to save each image
+  # fname = tf.constant("{}.jpeg".format(bottleneck_values[0]))
+  # fwrite = tf.write_file(fname,encodedImage)
+  #
+  # sess = tf.Session()
+  # results = sess.run(fwrite)
+
+
   return bottleneck_values
+
 
 
 def maybe_download_and_extract(data_url):
@@ -453,7 +517,6 @@ def ensure_dir_exists(dir_name):
 
 bottleneck_path_2_bottleneck_values = {}
 
-
 def create_bottleneck_file(bottleneck_path, image_lists, label_name, index,
                            image_dir, category, sess, jpeg_data_tensor,
                            decoded_image_tensor, resized_input_tensor,
@@ -462,12 +525,19 @@ def create_bottleneck_file(bottleneck_path, image_lists, label_name, index,
   tf.logging.info('Creating bottleneck at ' + bottleneck_path)
   image_path = get_image_path(image_lists, label_name, index,
                               image_dir, category)
+  #image_reader = tf.WholeFileReader()
+  #_, image_file = image_reader.read(image_path)
+  #image = tf.image.decode_jpeg(image_file)
+  #decodedImage = tf.image.decode_jpeg(jpeg_data, channels=3)
+  #print(decodedImage)
+  #rotatedImage = tf.contrib.image.rotate(image_data , randint(0,359))
+
   if not gfile.Exists(image_path):
     tf.logging.fatal('File does not exist %s', image_path)
-  image_data = gfile.FastGFile(image_path, 'rb').read()
+  #image_data = gfile.FastGFile(image_path, 'rb').read()
   try:
-    bottleneck_values = run_bottleneck_on_image(
-        sess, image_data, jpeg_data_tensor, decoded_image_tensor,
+    bottleneck_values = run_bottleneck_on_image(image_path,
+        sess, jpeg_data_tensor, decoded_image_tensor,
         resized_input_tensor, bottleneck_tensor)
   except Exception as e:
     raise RuntimeError('Error during processing file %s (%s)' % (image_path,
@@ -1147,6 +1217,7 @@ def main(_):
   # Look at the folder structure, and create lists of all the images.
   #image_lists = create_image_lists(FLAGS.image_dir, FLAGS.testing_percentage,
 #                                   FLAGS.validation_percentage)
+
   image_lists = create_image_lists2(FLAGS.Training_dir, FLAGS.Validation_dir)
   class_count = len(image_lists.keys())
   for key in image_lists.keys():
